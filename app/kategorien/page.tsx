@@ -314,6 +314,35 @@ export default function KategorienPage() {
     );
   };
 
+  // Generiere Dateinamen basierend auf aktiven Filtern
+  const generateFilenameFromFilters = (): string => {
+    const parts: string[] = [];
+    
+    if (selectedCategory) parts.push(selectedCategory);
+    if (selectedUnterkategorie) parts.push(selectedUnterkategorie);
+    if (selectedRohstoffArt) parts.push(selectedRohstoffArt);
+    if (selectedDirection) parts.push(selectedDirection);
+    if (selectedHebelHoehe) parts.push(selectedHebelHoehe);
+    
+    // Wenn ISIN/WKN-Suche aktiv ist, füge sie hinzu
+    if (searchIsin.trim().length >= 6) {
+      parts.push(`Suche-${searchIsin.trim().substring(0, 12)}`);
+    }
+    
+    // Wenn keine Filter, verwende Standard-Name
+    if (parts.length === 0) {
+      return "gesamte-datenbank";
+    }
+    
+    // Erstelle Dateinamen aus Filter-Teilen (ersetzte ungültige Zeichen)
+    const filename = parts.join("_")
+      .replace(/[^a-zA-Z0-9_-]/g, "-") // Ersetze ungültige Zeichen
+      .replace(/-+/g, "-") // Mehrfache Bindestriche zu einem
+      .substring(0, 200); // Begrenze Länge
+    
+    return filename || "gefilterte-ergebnisse";
+  };
+
   // Lade alle Daten in Batches (mit optionalen Filtern)
   const loadAllAssets = async (withFilters: boolean = false): Promise<Asset[]> => {
     const allAssets: Asset[] = [];
@@ -375,7 +404,7 @@ export default function KategorienPage() {
         return;
       }
 
-      const filenamePrefix = hasActiveFilters() ? "gefilterte-ergebnisse" : "gesamte-datenbank";
+      const filenamePrefix = generateFilenameFromFilters();
       createExcelFile(allAssets, filenamePrefix);
       setLoading(false);
     } catch (error) {
