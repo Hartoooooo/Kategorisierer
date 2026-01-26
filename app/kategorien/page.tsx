@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import * as XLSX from "xlsx";
 
 interface Asset {
   id: string;
@@ -278,6 +279,186 @@ export default function KategorienPage() {
     return parts.join(" / ");
   };
 
+  // Extrahiere verfügbare Hebelhöhen-Werte aus den Statistiken
+  const getAvailableHebelHoehen = (): string[] => {
+    const hebelHoehenSet = new Set<string>();
+    stats.forEach(stat => {
+      if (stat.hebel_hoehe) {
+        hebelHoehenSet.add(stat.hebel_hoehe);
+      }
+    });
+    
+    // Sortiere die Werte in einer bestimmten Reihenfolge
+    const order = ["2x", "3x", "4x", "5x", "10x", "20x", "Andere"];
+    const sorted = Array.from(hebelHoehenSet).sort((a, b) => {
+      const indexA = order.indexOf(a);
+      const indexB = order.indexOf(b);
+      if (indexA === -1 && indexB === -1) return a.localeCompare(b);
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    });
+    
+    return sorted;
+  };
+
+  // Prüft ob Filter aktiv sind
+  const hasActiveFilters = (): boolean => {
+    return !!(
+      selectedCategory ||
+      selectedUnterkategorie ||
+      selectedRohstoffArt ||
+      selectedDirection ||
+      selectedHebelHoehe ||
+      searchIsin.trim().length >= 6
+    );
+  };
+
+  // Lade alle Daten in Batches (mit optionalen Filtern)
+  const loadAllAssets = async (withFilters: boolean = false): Promise<Asset[]> => {
+    const allAssets: Asset[] = [];
+    const batchSize = 1000;
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const params = new URLSearchParams();
+      
+      // Wenn Filter verwendet werden sollen, füge sie hinzu
+      if (withFilters) {
+        if (selectedCategory) params.append("category", selectedCategory);
+        if (selectedUnterkategorie) params.append("unterkategorie_typ", selectedUnterkategorie);
+        if (selectedRohstoffArt) params.append("rohstoff_art", selectedRohstoffArt);
+        if (selectedDirection) params.append("direction", selectedDirection);
+        if (selectedHebelHoehe) params.append("hebel_hoehe", selectedHebelHoehe);
+      }
+      
+      params.append("limit", batchSize.toString());
+      params.append("offset", offset.toString());
+
+      const response = await fetch(`/api/categories?${params.toString()}`);
+      
+      if (!response.ok) {
+        throw new Error("Fehler beim Laden der Daten");
+      }
+
+      const data = await response.json();
+      const batchAssets = data.data || [];
+      
+      if (batchAssets.length === 0) {
+        hasMore = false;
+      } else {
+        allAssets.push(...batchAssets);
+        offset += batchSize;
+        
+        // Wenn weniger als batchSize zurückgegeben wurde, sind wir am Ende
+        if (batchAssets.length < batchSize) {
+          hasMore = false;
+        }
+      }
+    }
+
+    return allAssets;
+  };
+
+  // Exportiere Ergebnisse als Excel
+  const exportToExcel = async () => {
+    try {
+      setLoading(true);
+      
+      // Lade alle Daten (mit oder ohne Filter)
+      const allAssets = await loadAllAssets(hasActiveFilters());
+      
+      if (allAssets.length === 0) {
+        alert("Keine Daten zum Exportieren vorhanden");
+        setLoading(false);
+        return;
+      }
+
+      const filenamePrefix = hasActiveFilters() ? "gefilterte-ergebnisse" : "gesamte-datenbank";
+      createExcelFile(allAssets, filenamePrefix);
+      setLoading(false);
+    } catch (error) {
+      console.error("Fehler beim Laden der Daten:", error);
+      alert("Fehler beim Exportieren der Daten");
+      setLoading(false);
+    }
+  };
+
+  // Erstellt die Excel-Datei
+  const createExcelFile = (assetsToExport: Asset[], filenamePrefix: string) => {
+    // Excel-Header
+    const headers = [
+      "Name",
+      "ISIN",
+      "WKN",
+      "Kategorie",
+      "Unterkategorie",
+      "Rohstoff",
+      "Richtung",
+      "Hebelhöhe"
+    ];
+
+    // Daten für Excel vorbereiten
+    const excelData = assetsToExport.map(asset => {
+      const name = extractNameFromNotes(asset.notes) || asset.name || "";
+      const rohstoff = asset.rohstoff_typ === "kein_Rohstoff" ? "" : (asset.rohstoff_art || "");
+      
+      return {
+        Name: name,
+        ISIN: asset.isin || "",
+        WKN: asset.wkn || "",
+        Kategorie: asset.category || "",
+        Unterkategorie: asset.unterkategorie_typ || "",
+        Rohstoff: rohstoff,
+        Richtung: asset.direction || "",
+        Hebelhöhe: asset.hebel_hoehe || ""
+      };
+    });
+
+    // Excel-Workbook erstellen
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    
+    // Header-Reihenfolge setzen
+    XLSX.utils.sheet_add_aoa(worksheet, [headers], { origin: "A1" });
+    
+    // Spaltenbreiten anpassen
+    const columnWidths = [
+      { wch: 30 }, // Name
+      { wch: 15 }, // ISIN
+      { wch: 10 }, // WKN
+      { wch: 15 }, // Kategorie
+      { wch: 15 }, // Unterkategorie
+      { wch: 15 }, // Rohstoff
+      { wch: 10 }, // Richtung
+      { wch: 12 }  // Hebelhöhe
+    ];
+    worksheet["!cols"] = columnWidths;
+    
+    // Sheet zum Workbook hinzufügen
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Kategorien");
+
+    // Excel-Datei erstellen
+    const excelBuffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+    const blob = new Blob([excelBuffer], { 
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
+    });
+    
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    
+    // Dateiname mit aktuellem Datum
+    const date = new Date().toISOString().split("T")[0];
+    link.download = `${filenamePrefix}-${date}.xlsx`;
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   // Gruppiere Statistiken nach Hauptkategorien
   const groupedStats = stats.reduce((acc, stat) => {
     if (!acc[stat.category]) {
@@ -467,12 +648,11 @@ export default function KategorienPage() {
                 style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E")`, backgroundPosition: 'right 0.75rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.5em 1.5em' }}
               >
                 <option value="">Alle</option>
-                <option value="2x">2x</option>
-                <option value="3x">3x</option>
-                <option value="5x">5x</option>
-                <option value="10x">10x</option>
-                <option value="20x">20x</option>
-                <option value="Andere">Andere</option>
+                {getAvailableHebelHoehen().map((hebelHoehe) => (
+                  <option key={hebelHoehe} value={hebelHoehe}>
+                    {hebelHoehe}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -523,9 +703,22 @@ export default function KategorienPage() {
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
               Ergebnisse ({totalCount})
             </h2>
-            {loading && (
-              <div className="text-sm text-gray-600 dark:text-gray-400">Lädt...</div>
-            )}
+            <div className="flex items-center gap-4">
+              {assets.length > 0 && (
+                <button
+                  onClick={exportToExcel}
+                  className="px-4 py-2 text-sm bg-green-600 dark:bg-green-700 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-600 transition-colors flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Excel exportieren
+                </button>
+              )}
+              {loading && (
+                <div className="text-sm text-gray-600 dark:text-gray-400">Lädt...</div>
+              )}
+            </div>
           </div>
 
           {/* Fehlermeldung für ISIN/WKN-Suche */}
