@@ -1,4 +1,4 @@
-import { createClient } from "./server";
+import { createApiClient } from "./api";
 import { CheckedRow } from "@/types";
 
 /**
@@ -6,7 +6,7 @@ import { CheckedRow } from "@/types";
  */
 export async function saveCategorizedToSupabase(rows: CheckedRow[]): Promise<void> {
   try {
-    const supabase = await createClient();
+    const supabase = createApiClient();
     
     // Bereite die Daten für Supabase vor
     const dataToInsert = rows

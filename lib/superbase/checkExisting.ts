@@ -1,4 +1,4 @@
-import { createClient } from "./server";
+import { createApiClient } from "./api";
 import { CheckedRow } from "@/types";
 
 interface SupabaseAsset {
@@ -28,7 +28,7 @@ export async function checkExistingIsins(
   isins: string[]
 ): Promise<Map<string, SupabaseAsset | null>> {
   try {
-    const supabase = await createClient();
+    const supabase = createApiClient();
     
     if (isins.length === 0) {
       console.log("[checkExistingIsins] Keine ISINs zum Prüfen");

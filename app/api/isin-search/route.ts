@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/superbase/server";
+import { createApiClient } from "@/lib/superbase/api";
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
+    const supabase = createApiClient();
 
     // Suche ISIN in Supabase
     const { data, error } = await supabase
