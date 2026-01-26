@@ -100,7 +100,7 @@ export async function GET(request: NextRequest) {
       filename = `gesamt.xlsx`;
     }
 
-    return new NextResponse(buffer, {
+    return new NextResponse(buffer as unknown as BodyInit, {
       headers: {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -164,7 +164,7 @@ export async function POST(request: NextRequest) {
       filename = `gesamt.xlsx`;
     }
 
-    return new NextResponse(buffer, {
+    return new NextResponse(buffer as unknown as BodyInit, {
       headers: {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

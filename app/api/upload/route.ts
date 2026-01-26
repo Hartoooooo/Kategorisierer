@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
 
     // Excel parsen
-    const { rows, errors, headers } = parseExcel(buffer);
+    const { rows, errors, headers } = parseExcel(buffer.buffer);
 
     if (errors.length > 0 && rows.length === 0) {
       return NextResponse.json(

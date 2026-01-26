@@ -325,7 +325,7 @@ export async function POST(request: NextRequest) {
         categoryKey += `_Normal`;
       }
       
-      if (isRohstoff) {
+      if (isRohstoff && result.subCategory) {
         const rohstoffArt = result.subCategory.replace("Rohstoff_", "");
         categoryKey += `_Rohstoff_${rohstoffArt}`;
       } else {
@@ -367,9 +367,9 @@ export async function POST(request: NextRequest) {
       if (!result) {
         const fallbackResult = {
           category: "Unbekannt/Fehler" as const,
-          subCategory: null as const,
-          direction: null as const,
-          hebelHoehe: null as const,
+          subCategory: null,
+          direction: null,
+          hebelHoehe: null,
           status: "error" as const,
           notes: `Fehler beim Abrufen der Daten für ISIN ${isin}`,
         };
@@ -436,7 +436,7 @@ export async function POST(request: NextRequest) {
       }
       
       // Bei Rohstoffen: Füge Rohstoffart hinzu
-      if (isRohstoff) {
+      if (isRohstoff && result.subCategory) {
         // subCategory ist z.B. "Rohstoff_Gold", extrahiere nur "Gold"
         const rohstoffArt = result.subCategory.replace("Rohstoff_", "");
         categoryKey += `_Rohstoff_${rohstoffArt}`;
@@ -590,7 +590,7 @@ export async function POST(request: NextRequest) {
       }
       
       // Bei Rohstoffen: Füge Rohstoffart hinzu
-      if (isRohstoff) {
+      if (isRohstoff && row.subCategory) {
         // subCategory ist z.B. "Rohstoff_Gold", extrahiere nur "Gold"
         const rohstoffArt = row.subCategory.replace("Rohstoff_", "");
         categoryKey += `_Rohstoff_${rohstoffArt}`;

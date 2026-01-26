@@ -78,7 +78,7 @@ export function parseExcel(buffer: ArrayBuffer): {
     }
 
     // Erste Zeile als Header
-    const headerRow = jsonData[0] as string[];
+    const headerRow = jsonData[0] as unknown as string[];
     if (!Array.isArray(headerRow)) {
       errors.push("Ungültiges Header-Format");
       return { rows, errors, headers };
@@ -105,7 +105,7 @@ export function parseExcel(buffer: ArrayBuffer): {
 
     // Datenzeilen verarbeiten (ab Zeile 2)
     for (let i = 1; i < jsonData.length; i++) {
-      const row = jsonData[i] as unknown[];
+      const row = jsonData[i] as unknown as unknown[];
       if (!Array.isArray(row)) continue;
 
       const isinRaw = String(row[isinIndex] || "").trim();

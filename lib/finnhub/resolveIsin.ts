@@ -149,6 +149,9 @@ export async function resolveIsin(
       
       if (results.length > 0) {
         const bestMatch = findBestMatch(results);
+        if (!bestMatch) {
+          throw new Error(`Kein passender Match für ISIN ${isin} gefunden`);
+        }
         console.log(`[resolveIsin] Best Match für ${isin}:`, {
           symbol: bestMatch.symbol,
           description: bestMatch.description,
@@ -269,9 +272,9 @@ export async function resolveIsin(
   
   const errorResult = {
     category: "Unbekannt/Fehler" as const,
-    subCategory: null as const,
-    direction: null as const,
-    hebelHoehe: null as const,
+    subCategory: null,
+    direction: null,
+    hebelHoehe: null,
     status: "error" as const,
     notes: `❌ ISIN ${isin} konnte nicht über Finnhub aufgelöst werden${name ? ` | Name: "${name}"` : ""}${lastError ? ` | Fehler: ${lastError.message}` : ""}${isRateLimitError ? " | ⚠️ Rate Limit (429) - wird später erneut geprüft" : ""}`,
     // Markiere 429-Fehler für spätere Wiederholung

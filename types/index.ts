@@ -33,7 +33,7 @@ export interface ParsedRow {
   wkn: string;
   validIsin: boolean;
   // Alle ursprünglichen Spalten aus der Excel-Datei
-  originalRowData: Record<string, unknown>;
+  originalRowData?: Record<string, unknown>;
 }
 
 export interface CheckedRow extends ParsedRow {
