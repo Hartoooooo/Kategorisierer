@@ -4,34 +4,48 @@ import { createApiClient } from "@/lib/superbase/api";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { isin } = body;
+    const { isin, wkn } = body;
 
-    if (!isin || typeof isin !== "string") {
+    const searchValue = isin || wkn;
+    const searchType = isin ? "isin" : "wkn";
+
+    if (!searchValue || typeof searchValue !== "string") {
       return NextResponse.json(
-        { error: "ISIN fehlt oder ist ungültig" },
+        { error: "ISIN oder WKN fehlt oder ist ungültig" },
         { status: 400 }
       );
     }
 
-    // Normalisiere ISIN (Großbuchstaben, keine Leerzeichen)
-    const normalizedIsin = isin.trim().toUpperCase();
+    // Normalisiere Suchwert (Großbuchstaben, keine Leerzeichen)
+    const normalizedValue = searchValue.trim().toUpperCase();
 
-    if (normalizedIsin.length < 12) {
+    // Validierung: ISIN muss mindestens 12 Zeichen haben, WKN mindestens 6
+    if (searchType === "isin" && normalizedValue.length < 12) {
       return NextResponse.json(
         { error: "ISIN muss mindestens 12 Zeichen lang sein" },
         { status: 400 }
       );
     }
 
+    if (searchType === "wkn" && normalizedValue.length < 6) {
+      return NextResponse.json(
+        { error: "WKN muss mindestens 6 Zeichen lang sein" },
+        { status: 400 }
+      );
+    }
+
     const supabase = createApiClient();
 
-    // Suche ISIN in Supabase
-    const { data, error } = await supabase
-      .from("categorized_assets")
-      .select("*")
-      .eq("isin", normalizedIsin)
-      .limit(1)
-      .single();
+    // Suche nach ISIN oder WKN in Supabase
+    let query = supabase.from("categorized_assets").select("*");
+    
+    if (searchType === "isin") {
+      query = query.eq("isin", normalizedValue);
+    } else {
+      query = query.eq("wkn", normalizedValue);
+    }
+    
+    const { data, error } = await query.limit(1).single();
 
     if (error) {
       // Wenn kein Eintrag gefunden wurde (PGRST116 = no rows returned)
