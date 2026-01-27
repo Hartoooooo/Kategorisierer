@@ -524,7 +524,7 @@ export default function KategorienPage() {
                 value={searchIsin}
                 onChange={(e) => setSearchIsin(e.target.value.toUpperCase())}
                 placeholder="ISIN oder WKN suchen..."
-                className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-0 w-48"
+                className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-0 w-64"
                 disabled={isSearchingIsin}
               />
               {isSearchingIsin && (
@@ -730,7 +730,7 @@ export default function KategorienPage() {
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-              Ergebnisse ({totalCount})
+              Ergebnisse ({totalCount} Werte)
             </h2>
             <div className="flex items-center gap-4">
               {assets.length > 0 && (
