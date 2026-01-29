@@ -26,7 +26,7 @@ function findColumns(headers: string[]): {
   let wknIndex: number | null = null;
 
   const isinAliases = ["isin", "isincode", "isincode"];
-  const nameAliases = ["name", "bezeichnung", "titel", "instrumentname"];
+  const nameAliases = ["name", "bezeichnung", "titel", "instrumentname", "instrument", "wertpapiername", "papiername", "securityname", "description", "beschreibung"];
   const wknAliases = ["wkn", "wertpapierkennnummer"];
 
   headers.forEach((header, index) => {
@@ -87,19 +87,32 @@ export function parseExcel(buffer: ArrayBuffer): {
     // Header speichern
     headers = headerRow.map((h) => String(h || "").trim());
 
+    // Debug: Zeige alle gefundenen Header
+    console.log("[parseExcel] Gefundene Header:", headers);
+
     const { isinIndex, nameIndex, wknIndex } = findColumns(headerRow);
+    
+    // Debug: Zeige gefundene Indizes
+    console.log("[parseExcel] Gefundene Spalten:", {
+      ISIN: isinIndex !== null ? `Index ${isinIndex} (${headers[isinIndex || 0]})` : "NICHT GEFUNDEN",
+      Name: nameIndex !== null ? `Index ${nameIndex} (${headers[nameIndex || 0]})` : "NICHT GEFUNDEN",
+      WKN: wknIndex !== null ? `Index ${wknIndex} (${headers[wknIndex || 0]})` : "NICHT GEFUNDEN"
+    });
 
     if (isinIndex === null) {
-      errors.push("ISIN-Spalte nicht gefunden");
+      errors.push("ISIN-Spalte nicht gefunden. Erwartete Spaltennamen: ISIN, ISIN Code, ISINCode");
     }
     if (nameIndex === null) {
-      errors.push("Name-Spalte nicht gefunden");
+      // Name-Spalte ist optional, aber wir warnen trotzdem
+      console.warn("Name-Spalte nicht gefunden. Erwartete Spaltennamen: Name, Bezeichnung, Titel, Instrument Name, etc.");
     }
     if (wknIndex === null) {
-      errors.push("WKN-Spalte nicht gefunden");
+      // WKN-Spalte ist optional
+      console.warn("WKN-Spalte nicht gefunden. Erwartete Spaltennamen: WKN, Wertpapierkennnummer");
     }
 
-    if (isinIndex === null || nameIndex === null || wknIndex === null) {
+    // Nur ISIN ist erforderlich
+    if (isinIndex === null) {
       return { rows, errors, headers };
     }
 
@@ -109,8 +122,8 @@ export function parseExcel(buffer: ArrayBuffer): {
       if (!Array.isArray(row)) continue;
 
       const isinRaw = String(row[isinIndex] || "").trim();
-      const nameRaw = String(row[nameIndex] || "").trim();
-      const wknRaw = String(row[wknIndex] || "").trim();
+      const nameRaw = nameIndex !== null ? String(row[nameIndex] || "").trim() : "";
+      const wknRaw = wknIndex !== null ? String(row[wknIndex] || "").trim() : "";
 
       // Überspringe leere Zeilen
       if (!isinRaw && !nameRaw && !wknRaw) continue;
