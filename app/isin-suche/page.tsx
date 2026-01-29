@@ -22,6 +22,31 @@ interface IsinSearchResult {
 }
 
 /**
+ * Extrahiert den Namen aus den Notes nach "Name:"
+ */
+function extractNameFromNotes(notes: string | null): string | null {
+  if (!notes) return null;
+  
+  // Suche nach "Name:" (case-insensitive)
+  const nameIndex = notes.toLowerCase().indexOf("name:");
+  if (nameIndex === -1) return null;
+  
+  // Extrahiere den Text nach "Name:"
+  let nameText = notes.substring(nameIndex + 5).trim();
+  
+  // Stoppe beim nächsten "|" oder am Ende
+  const pipeIndex = nameText.indexOf("|");
+  if (pipeIndex !== -1) {
+    nameText = nameText.substring(0, pipeIndex).trim();
+  }
+  
+  // Entferne alle Anführungszeichen (am Anfang, Ende oder überall)
+  nameText = nameText.replace(/^["']+|["']+$/g, '').trim();
+  
+  return nameText || null;
+}
+
+/**
  * Extrahiert Mnemonic aus original_row_data
  */
 function extractMnemonic(originalRowData: Record<string, unknown> | null | string): string | null {
@@ -361,10 +386,12 @@ export default function IsinSuchePage() {
                 </h2>
                 
                 <div className="space-y-4">
-                  {result.name && (
+                  {(extractNameFromNotes(result.notes) || result.name) && (
                     <div>
                       <span className="font-medium text-gray-700 dark:text-gray-300">Name:</span>
-                      <span className="ml-2 text-gray-900 dark:text-white">{result.name}</span>
+                      <span className="ml-2 text-gray-900 dark:text-white">
+                        {extractNameFromNotes(result.notes) || result.name || "-"}
+                      </span>
                     </div>
                   )}
                   
