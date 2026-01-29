@@ -54,6 +54,104 @@ function extractNameFromNotes(notes: string | null): string | null {
   return nameText || null;
 }
 
+/**
+ * Extrahiert Mnemonic aus original_row_data
+ * Behandelt verschiedene Formate:
+ * - "Mnemonic": "GWS"
+ * - "Mnemonic": "\"GWS\""
+ * - "Mnemonic": '"GWS"'
+ * - Falls original_row_data als JSON-String gespeichert ist, wird es geparst
+ */
+function extractMnemonic(originalRowData: Record<string, unknown> | null | string): string | null {
+  if (!originalRowData) return null;
+  
+  // Falls original_row_data ein JSON-String ist, parse ihn zuerst
+  let data: Record<string, unknown> | null = null;
+  if (typeof originalRowData === "string") {
+    try {
+      data = JSON.parse(originalRowData);
+    } catch (e) {
+      // Falls Parsing fehlschlägt, behandle es als normales Objekt
+      return null;
+    }
+  } else {
+    data = originalRowData as Record<string, unknown>;
+  }
+  
+  if (!data) return null;
+  
+  // Versuche zuerst direkt auf "Mnemonic" zuzugreifen
+  let mnemonic = data["Mnemonic"];
+  
+  // Falls nicht gefunden, versuche case-insensitive Suche
+  if (!mnemonic) {
+    const keys = Object.keys(data);
+    const mnemonicKey = keys.find(key => key.toLowerCase() === "mnemonic");
+    if (mnemonicKey) {
+      mnemonic = data[mnemonicKey];
+    }
+  }
+  
+  if (!mnemonic) return null;
+  
+  // Wenn es bereits ein String ist
+  if (typeof mnemonic === "string") {
+    let cleaned = mnemonic.trim();
+    
+    // Entferne alle Anführungszeichen am Anfang und Ende (auch verschachtelte)
+    // Behandelt Fälle wie: "GWS", '"GWS"', '\'GWS\'', "\"GWS\"", etc.
+    // Wiederhole mehrfach, um verschachtelte Anführungszeichen zu entfernen
+    let previousLength = cleaned.length;
+    while (true) {
+      cleaned = cleaned.replace(/^["']+|["']+$/g, '');
+      if (cleaned.length === previousLength) break; // Keine Änderung mehr
+      previousLength = cleaned.length;
+    }
+    
+    return cleaned.trim() || null;
+  }
+  
+  // Wenn es ein Objekt ist, versuche den Wert zu extrahieren
+  if (typeof mnemonic === "object" && mnemonic !== null) {
+    // Falls es ein Objekt mit einem Wert ist, versuche den Wert zu extrahieren
+    const objKeys = Object.keys(mnemonic);
+    if (objKeys.length > 0) {
+      const firstValue = (mnemonic as Record<string, unknown>)[objKeys[0]];
+      if (typeof firstValue === "string") {
+        let cleaned = firstValue.trim();
+        let previousLength = cleaned.length;
+        while (true) {
+          cleaned = cleaned.replace(/^["']+|["']+$/g, '');
+          if (cleaned.length === previousLength) break;
+          previousLength = cleaned.length;
+        }
+        return cleaned.trim() || null;
+      }
+    }
+    
+    // Fallback: Konvertiere zu String
+    const mnemonicStr = String(mnemonic);
+    let cleaned = mnemonicStr.trim();
+    let previousLength = cleaned.length;
+    while (true) {
+      cleaned = cleaned.replace(/^["']+|["']+$/g, '');
+      if (cleaned.length === previousLength) break;
+      previousLength = cleaned.length;
+    }
+    return cleaned.trim() || null;
+  }
+  
+  // Konvertiere zu String und entferne Anführungszeichen
+  let cleaned = String(mnemonic).trim();
+  let previousLength = cleaned.length;
+  while (true) {
+    cleaned = cleaned.replace(/^["']+|["']+$/g, '');
+    if (cleaned.length === previousLength) break;
+    previousLength = cleaned.length;
+  }
+  return cleaned || null;
+}
+
 export default function KategorienPage() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [stats, setStats] = useState<CategoryStats[]>([]);
@@ -96,21 +194,32 @@ export default function KategorienPage() {
     loadAssets();
   }, [selectedCategory, selectedUnterkategorie, selectedRohstoffArt, selectedDirection, selectedHebelHoehe, currentPage]);
 
-  // Suche automatisch, wenn ISIN oder WKN eingegeben wird
+  // Suche automatisch, wenn ISIN, WKN oder Mnemonic eingegeben wird (mit Debouncing)
   useEffect(() => {
     const normalizedSearch = searchIsin.trim().toUpperCase();
     
-    // ISIN: mindestens 12 Zeichen, WKN: mindestens 6 Zeichen
-    if (normalizedSearch.length >= 12 || (normalizedSearch.length >= 6 && normalizedSearch.length < 12)) {
-      handleIsinSearch(normalizedSearch);
-    } else {
+    // Wenn das Suchfeld leer ist, lade normale Assets
+    if (normalizedSearch.length === 0) {
       setSearchResult(null);
       setSearchError(null);
-      // Wenn keine Suche mehr eingegeben wird, lade normale Assets
-      if (normalizedSearch.length === 0 && !loading) {
+      if (!loading) {
         loadAssets();
       }
+      return;
     }
+    
+    // Debouncing: Warte 500ms nach dem letzten Tastendruck bevor gesucht wird
+    const debounceTimer = setTimeout(() => {
+      // ISIN: mindestens 12 Zeichen, WKN: mindestens 6 Zeichen, Mnemonic: mindestens 1 Zeichen
+      if (normalizedSearch.length >= 12 || (normalizedSearch.length >= 6 && normalizedSearch.length < 12) || normalizedSearch.length >= 1) {
+        handleIsinSearch(normalizedSearch);
+      }
+    }, 500); // 500ms Verzögerung
+    
+    // Cleanup: Timer löschen wenn sich der Wert vor Ablauf ändert
+    return () => {
+      clearTimeout(debounceTimer);
+    };
   }, [searchIsin]);
 
   const loadStats = async () => {
@@ -133,8 +242,8 @@ export default function KategorienPage() {
   };
 
   const loadAssets = async () => {
-    // Wenn eine ISIN-Suche aktiv ist, nicht die normalen Assets laden
-    if (searchIsin.trim().length >= 12) {
+    // Wenn eine Suche aktiv ist, nicht die normalen Assets laden
+    if (searchIsin.trim().length >= 1) {
       return;
     }
 
@@ -204,23 +313,25 @@ export default function KategorienPage() {
   };
 
   const handleIsinSearch = async (searchValue: string) => {
-    // Bestimme ob es eine ISIN (12+ Zeichen) oder WKN (6-11 Zeichen) ist
+    // Bestimme ob es eine ISIN (12+ Zeichen), WKN (6-11 Zeichen) oder Mnemonic (1+ Zeichen) ist
     const isIsin = searchValue.length >= 12;
     const isWkn = searchValue.length >= 6 && searchValue.length < 12;
-
-    if (!isIsin && !isWkn) {
-      setSearchError("Bitte geben Sie eine gültige ISIN (mindestens 12 Zeichen) oder WKN (mindestens 6 Zeichen) ein");
-      return;
-    }
+    const isMnemonic = searchValue.length >= 1 && searchValue.length < 6;
 
     setIsSearchingIsin(true);
     setSearchError(null);
     setSearchResult(null);
 
     try {
-      const requestBody = isIsin 
-        ? { isin: searchValue }
-        : { wkn: searchValue };
+      let requestBody;
+      if (isIsin) {
+        requestBody = { isin: searchValue };
+      } else if (isWkn) {
+        requestBody = { wkn: searchValue };
+      } else {
+        // Mnemonic oder allgemeine Suche
+        requestBody = { mnemonic: searchValue };
+      }
 
       const response = await fetch("/api/isin-search", {
         method: "POST",
@@ -243,7 +354,13 @@ export default function KategorienPage() {
         setAssets([data.data]);
         setTotalCount(1);
       } else {
-        setSearchError(isIsin ? "ISIN nicht in der Datenbank gefunden" : "WKN nicht in der Datenbank gefunden");
+        if (isIsin) {
+          setSearchError("ISIN nicht in der Datenbank gefunden");
+        } else if (isWkn) {
+          setSearchError("WKN nicht in der Datenbank gefunden");
+        } else {
+          setSearchError("Mnemonic nicht in der Datenbank gefunden");
+        }
         setAssets([]);
         setTotalCount(0);
       }
@@ -310,7 +427,7 @@ export default function KategorienPage() {
       selectedRohstoffArt ||
       selectedDirection ||
       selectedHebelHoehe ||
-      searchIsin.trim().length >= 6
+      searchIsin.trim().length >= 1
     );
   };
 
@@ -324,8 +441,8 @@ export default function KategorienPage() {
     if (selectedDirection) parts.push(selectedDirection);
     if (selectedHebelHoehe) parts.push(selectedHebelHoehe);
     
-    // Wenn ISIN/WKN-Suche aktiv ist, füge sie hinzu
-    if (searchIsin.trim().length >= 6) {
+    // Wenn Suche aktiv ist, füge sie hinzu
+    if (searchIsin.trim().length >= 1) {
       parts.push(`Suche-${searchIsin.trim().substring(0, 12)}`);
     }
     
@@ -421,6 +538,7 @@ export default function KategorienPage() {
       "Name",
       "ISIN",
       "WKN",
+      "Mnemonic",
       "Kategorie",
       "Unterkategorie",
       "Rohstoff",
@@ -432,11 +550,13 @@ export default function KategorienPage() {
     const excelData = assetsToExport.map(asset => {
       const name = extractNameFromNotes(asset.notes) || asset.name || "";
       const rohstoff = asset.rohstoff_typ === "kein_Rohstoff" ? "" : (asset.rohstoff_art || "");
+      const mnemonic = extractMnemonic(asset.original_row_data) || "";
       
       return {
         Name: name,
         ISIN: asset.isin || "",
         WKN: asset.wkn || "",
+        Mnemonic: mnemonic,
         Kategorie: asset.category || "",
         Unterkategorie: asset.unterkategorie_typ || "",
         Rohstoff: rohstoff,
@@ -457,6 +577,7 @@ export default function KategorienPage() {
       { wch: 30 }, // Name
       { wch: 15 }, // ISIN
       { wch: 10 }, // WKN
+      { wch: 12 }, // Mnemonic
       { wch: 15 }, // Kategorie
       { wch: 15 }, // Unterkategorie
       { wch: 15 }, // Rohstoff
@@ -523,7 +644,7 @@ export default function KategorienPage() {
                 type="text"
                 value={searchIsin}
                 onChange={(e) => setSearchIsin(e.target.value.toUpperCase())}
-                placeholder="ISIN oder WKN suchen..."
+                placeholder="ISIN, WKN oder Mnemonic suchen..."
                 className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-0 w-64"
                 disabled={isSearchingIsin}
               />
@@ -750,8 +871,8 @@ export default function KategorienPage() {
             </div>
           </div>
 
-          {/* Fehlermeldung für ISIN/WKN-Suche */}
-          {searchError && (searchIsin.trim().length >= 12 || (searchIsin.trim().length >= 6 && searchIsin.trim().length < 12)) && (
+          {/* Fehlermeldung für ISIN/WKN/Mnemonic-Suche */}
+          {searchError && searchIsin.trim().length >= 1 && (
             <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
               <p className="text-red-800 dark:text-red-200">{searchError}</p>
             </div>
@@ -777,6 +898,9 @@ export default function KategorienPage() {
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">
                         WKN
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">
+                        Mnemonic
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">
                         Kategorie
@@ -821,6 +945,9 @@ export default function KategorienPage() {
                           <span className={clickedWkn === asset.wkn ? "text-blue-600 dark:text-blue-400 transition-colors" : "text-gray-900 dark:text-white transition-colors"}>
                             {asset.wkn || "-"}
                           </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                          {extractMnemonic(asset.original_row_data) || "-"}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                           {asset.category}
