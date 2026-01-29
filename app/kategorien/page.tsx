@@ -55,6 +55,39 @@ function extractNameFromNotes(notes: string | null): string | null {
 }
 
 /**
+ * Extrahiert Basket-Wert aus original_row_data (exakt wie gespeichert)
+ */
+function extractBasket(originalRowData: Record<string, unknown> | null | string): string | null {
+  if (!originalRowData) return null;
+  
+  // Falls original_row_data ein JSON-String ist, parse ihn zuerst
+  let data: Record<string, unknown> | null = null;
+  if (typeof originalRowData === "string") {
+    try {
+      data = JSON.parse(originalRowData);
+    } catch (e) {
+      return null;
+    }
+  } else {
+    data = originalRowData as Record<string, unknown>;
+  }
+  
+  if (!data) return null;
+  
+  // Suche nach Basket in verschiedenen Schreibweisen (case-insensitive)
+  const basketKeys = Object.keys(data).filter(k => k.toLowerCase() === "basket");
+  
+  if (basketKeys.length === 0) return null;
+  
+  const basket = data[basketKeys[0]];
+  
+  if (basket === null || basket === undefined) return null;
+  
+  // Gib den Wert exakt zurück, wie er gespeichert ist (als String)
+  return String(basket);
+}
+
+/**
  * Extrahiert Mnemonic aus original_row_data
  * Behandelt verschiedene Formate:
  * - "Mnemonic": "GWS"
@@ -172,6 +205,7 @@ export default function KategorienPage() {
   const [searchResult, setSearchResult] = useState<Asset | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+  const [basketFilter, setBasketFilter] = useState<"EIX B" | "EIX M" | null>(null);
 
   // Dark Mode initialisieren
   useEffect(() => {
@@ -193,7 +227,7 @@ export default function KategorienPage() {
   // Lade Assets wenn Filter sich ändern
   useEffect(() => {
     loadAssets();
-  }, [selectedCategory, selectedUnterkategorie, selectedRohstoffArt, selectedDirection, selectedHebelHoehe, currentPage]);
+  }, [selectedCategory, selectedUnterkategorie, selectedRohstoffArt, selectedDirection, selectedHebelHoehe, basketFilter, currentPage]);
 
   // Suche automatisch, wenn ISIN, WKN oder Mnemonic eingegeben wird (mit Debouncing)
   useEffect(() => {
@@ -278,6 +312,7 @@ export default function KategorienPage() {
       if (selectedRohstoffArt) params.append("rohstoff_art", selectedRohstoffArt);
       if (selectedDirection) params.append("direction", selectedDirection);
       if (selectedHebelHoehe) params.append("hebel_hoehe", selectedHebelHoehe);
+      if (basketFilter) params.append("basket", basketFilter);
       params.append("limit", pageSize.toString());
       params.append("offset", ((currentPage - 1) * pageSize).toString());
 
@@ -288,8 +323,18 @@ export default function KategorienPage() {
       }
 
       const data = await response.json();
-      setAssets(data.data || []);
-      setTotalCount(data.count || 0);
+      const loadedAssets = data.data || [];
+      const loadedCount = data.count || 0;
+      
+      console.log(`[Kategorien-Seite] Geladene Assets: ${loadedAssets.length}, Count: ${loadedCount}, Basket-Filter: ${basketFilter}`);
+      
+      setAssets(loadedAssets);
+      setTotalCount(loadedCount);
+      
+      // Warnung wenn Filter aktiv ist aber keine Daten gefunden
+      if (basketFilter && loadedAssets.length === 0 && loadedCount === 0) {
+        console.warn(`[Kategorien-Seite] Keine Daten gefunden mit Basket-Filter: ${basketFilter}`);
+      }
     } catch (error) {
       console.error("Fehler beim Laden der Assets:", error);
     } finally {
@@ -402,6 +447,7 @@ export default function KategorienPage() {
     setSelectedRohstoffArt(null);
     setSelectedDirection(null);
     setSelectedHebelHoehe(null);
+    setBasketFilter(null);
     setCurrentPage(1);
   };
 
@@ -450,6 +496,7 @@ export default function KategorienPage() {
       selectedRohstoffArt ||
       selectedDirection ||
       selectedHebelHoehe ||
+      basketFilter ||
       searchIsin.trim().length >= 1
     );
   };
@@ -500,6 +547,7 @@ export default function KategorienPage() {
         if (selectedRohstoffArt) params.append("rohstoff_art", selectedRohstoffArt);
         if (selectedDirection) params.append("direction", selectedDirection);
         if (selectedHebelHoehe) params.append("hebel_hoehe", selectedHebelHoehe);
+        if (basketFilter) params.append("basket", basketFilter);
       }
       
       params.append("limit", batchSize.toString());
@@ -558,6 +606,7 @@ export default function KategorienPage() {
   const createExcelFile = (assetsToExport: Asset[], filenamePrefix: string) => {
     // Excel-Header
     const headers = [
+      "Basket",
       "Name",
       "ISIN",
       "WKN",
@@ -574,8 +623,10 @@ export default function KategorienPage() {
       const name = extractNameFromNotes(asset.notes) || asset.name || "";
       const rohstoff = asset.rohstoff_typ === "kein_Rohstoff" ? "" : (asset.rohstoff_art || "");
       const mnemonic = extractMnemonic(asset.original_row_data) || "";
+      const basket = extractBasket(asset.original_row_data) || "";
       
       return {
+        Basket: basket,
         Name: name,
         ISIN: asset.isin || "",
         WKN: asset.wkn || "",
@@ -597,6 +648,7 @@ export default function KategorienPage() {
     
     // Spaltenbreiten anpassen
     const columnWidths = [
+      { wch: 15 }, // Basket
       { wch: 30 }, // Name
       { wch: 15 }, // ISIN
       { wch: 10 }, // WKN
@@ -718,7 +770,51 @@ export default function KategorienPage() {
         {/* Filter-Sektion */}
         <div className="mb-8 p-4 bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-700">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Filter</h2>
+            <div className="flex items-center gap-4">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Filter</h2>
+              {/* Basket Filter Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setBasketFilter(null);
+                    setCurrentPage(1);
+                  }}
+                  className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                    basketFilter === null
+                      ? "bg-blue-600 dark:bg-blue-700 text-white font-semibold"
+                      : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                  }`}
+                >
+                  Alle
+                </button>
+                <button
+                  onClick={() => {
+                    setBasketFilter("EIX B");
+                    setCurrentPage(1);
+                  }}
+                  className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                    basketFilter === "EIX B"
+                      ? "bg-blue-600 dark:bg-blue-700 text-white font-semibold"
+                      : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                  }`}
+                >
+                  EIX B
+                </button>
+                <button
+                  onClick={() => {
+                    setBasketFilter("EIX M");
+                    setCurrentPage(1);
+                  }}
+                  className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                    basketFilter === "EIX M"
+                      ? "bg-blue-600 dark:bg-blue-700 text-white font-semibold"
+                      : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                  }`}
+                >
+                  EIX M
+                </button>
+              </div>
+            </div>
             <button
               onClick={resetFilters}
               className="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
@@ -924,6 +1020,9 @@ export default function KategorienPage() {
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">
+                        Basket
+                      </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase min-w-[300px]">
                         Name
                       </th>
@@ -959,6 +1058,9 @@ export default function KategorienPage() {
                         key={asset.id}
                         className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                       >
+                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                          {extractBasket(asset.original_row_data) || "-"}
+                        </td>
                         <td className="px-4 py-3 text-sm text-gray-900 dark:text-white min-w-[300px]">
                           {extractNameFromNotes(asset.notes) || asset.name || "-"}
                         </td>

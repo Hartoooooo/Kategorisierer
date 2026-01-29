@@ -47,6 +47,39 @@ function extractNameFromNotes(notes: string | null): string | null {
 }
 
 /**
+ * Extrahiert Basket-Wert aus original_row_data (exakt wie gespeichert)
+ */
+function extractBasket(originalRowData: Record<string, unknown> | null | string): string | null {
+  if (!originalRowData) return null;
+  
+  // Falls original_row_data ein JSON-String ist, parse ihn zuerst
+  let data: Record<string, unknown> | null = null;
+  if (typeof originalRowData === "string") {
+    try {
+      data = JSON.parse(originalRowData);
+    } catch (e) {
+      return null;
+    }
+  } else {
+    data = originalRowData as Record<string, unknown>;
+  }
+  
+  if (!data) return null;
+  
+  // Suche nach Basket in verschiedenen Schreibweisen (case-insensitive)
+  const basketKeys = Object.keys(data).filter(k => k.toLowerCase() === "basket");
+  
+  if (basketKeys.length === 0) return null;
+  
+  const basket = data[basketKeys[0]];
+  
+  if (basket === null || basket === undefined) return null;
+  
+  // Gib den Wert exakt zurück, wie er gespeichert ist (als String)
+  return String(basket);
+}
+
+/**
  * Extrahiert Mnemonic aus original_row_data
  */
 function extractMnemonic(originalRowData: Record<string, unknown> | null | string): string | null {
@@ -400,6 +433,15 @@ export default function IsinSuchePage() {
                     <span className="ml-2 text-gray-900 dark:text-white">{result.isin}</span>
                   </div>
                   
+                  {(result.mnemonic || (result.original_row_data && extractMnemonic(result.original_row_data))) && (
+                    <div>
+                      <span className="font-medium text-gray-700 dark:text-gray-300">Mnemonic:</span>
+                      <span className="ml-2 text-gray-900 dark:text-white">
+                        {result.mnemonic || (result.original_row_data ? extractMnemonic(result.original_row_data) : null) || "-"}
+                      </span>
+                    </div>
+                  )}
+                  
                   {result.wkn && (
                     <div>
                       <span className="font-medium text-gray-700 dark:text-gray-300">WKN:</span>
@@ -407,11 +449,11 @@ export default function IsinSuchePage() {
                     </div>
                   )}
                   
-                  {(result.mnemonic || (result.original_row_data && extractMnemonic(result.original_row_data))) && (
+                  {result.original_row_data && extractBasket(result.original_row_data) && (
                     <div>
-                      <span className="font-medium text-gray-700 dark:text-gray-300">Mnemonic:</span>
+                      <span className="font-medium text-gray-700 dark:text-gray-300">Basket:</span>
                       <span className="ml-2 text-gray-900 dark:text-white">
-                        {result.mnemonic || (result.original_row_data ? extractMnemonic(result.original_row_data) : null) || "-"}
+                        {extractBasket(result.original_row_data) || "-"}
                       </span>
                     </div>
                   )}
