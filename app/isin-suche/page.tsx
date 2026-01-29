@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 interface IsinSearchResult {
   isin: string;
@@ -89,6 +87,7 @@ export default function IsinSuchePage() {
   const [result, setResult] = useState<IsinSearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(true);
+  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Dark Mode initialisieren
   useEffect(() => {
@@ -114,18 +113,40 @@ export default function IsinSuchePage() {
     }
     
     // Debouncing: Warte 500ms nach dem letzten Tastendruck bevor gesucht wird
-    const debounceTimer = setTimeout(() => {
+    const timer = setTimeout(() => {
       // ISIN: mindestens 12 Zeichen, WKN: mindestens 6 Zeichen, Mnemonic: mindestens 1 Zeichen
       if (normalizedSearch.length >= 12 || (normalizedSearch.length >= 6 && normalizedSearch.length < 12) || normalizedSearch.length >= 1) {
         handleSearch(normalizedSearch);
       }
     }, 500); // 500ms Verzögerung
     
+    setDebounceTimer(timer);
+    
     // Cleanup: Timer löschen wenn sich der Wert vor Ablauf ändert
     return () => {
-      clearTimeout(debounceTimer);
+      clearTimeout(timer);
     };
   }, [searchValue]);
+
+  // Handler für Paste-Events: Sofortige Suche ohne Debouncing
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    // Lösche den Debounce-Timer, damit die Suche sofort ausgeführt wird
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      setDebounceTimer(null);
+    }
+    
+    // Lese den eingefügten Wert aus dem Clipboard
+    const pastedText = e.clipboardData.getData('text');
+    const pastedValue = pastedText.trim().toUpperCase();
+    
+    // Warte kurz, damit der Wert im Input-Feld aktualisiert wird, dann suche sofort
+    setTimeout(() => {
+      if (pastedValue.length >= 1) {
+        handleSearch(pastedValue);
+      }
+    }, 10);
+  };
 
   const handleSearch = async (searchInput?: string) => {
     const normalizedValue = searchInput || searchValue.trim().toUpperCase();
@@ -241,9 +262,28 @@ export default function IsinSuchePage() {
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            ISIN / WKN / Mnemonic Suche
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+              <a href="/" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                Kategorisierung
+              </a>
+            </h1>
+            <span className="text-3xl font-bold text-gray-900 dark:text-white mx-2">/</span>
+            <a
+              href="/kategorien"
+              className="text-3xl font-bold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              Kategorien
+            </a>
+            <span className="text-3xl font-bold text-gray-900 dark:text-white mx-2">/</span>
+            <a
+              href="/isin-suche"
+              className="text-3xl font-bold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              Suche
+            </a>
+          </div>
+          
           <div className="flex items-center gap-4">
             {/* Dark/Light Mode Toggle */}
             <button
@@ -279,12 +319,6 @@ export default function IsinSuchePage() {
                 )}
               </span>
             </button>
-            <Link
-              href="/"
-              className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-            >
-              Zurück zur Startseite
-            </Link>
           </div>
         </div>
 
@@ -299,6 +333,7 @@ export default function IsinSuchePage() {
               type="text"
               value={searchValue}
               onChange={(e) => setSearchValue(e.target.value.toUpperCase())}
+              onPaste={handlePaste}
               placeholder="z.B. DE0001234567 (ISIN), 123456 (WKN) oder GWS (Mnemonic)"
               className="w-full px-6 py-4 text-lg border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white transition-colors"
               disabled={isSearching}

@@ -171,6 +171,7 @@ export default function KategorienPage() {
   const [isSearchingIsin, setIsSearchingIsin] = useState(false);
   const [searchResult, setSearchResult] = useState<Asset | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Dark Mode initialisieren
   useEffect(() => {
@@ -209,18 +210,40 @@ export default function KategorienPage() {
     }
     
     // Debouncing: Warte 500ms nach dem letzten Tastendruck bevor gesucht wird
-    const debounceTimer = setTimeout(() => {
+    const timer = setTimeout(() => {
       // ISIN: mindestens 12 Zeichen, WKN: mindestens 6 Zeichen, Mnemonic: mindestens 1 Zeichen
       if (normalizedSearch.length >= 12 || (normalizedSearch.length >= 6 && normalizedSearch.length < 12) || normalizedSearch.length >= 1) {
         handleIsinSearch(normalizedSearch);
       }
     }, 500); // 500ms Verzögerung
     
+    setDebounceTimer(timer);
+    
     // Cleanup: Timer löschen wenn sich der Wert vor Ablauf ändert
     return () => {
-      clearTimeout(debounceTimer);
+      clearTimeout(timer);
     };
   }, [searchIsin]);
+
+  // Handler für Paste-Events: Sofortige Suche ohne Debouncing
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    // Lösche den Debounce-Timer, damit die Suche sofort ausgeführt wird
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      setDebounceTimer(null);
+    }
+    
+    // Lese den eingefügten Wert aus dem Clipboard
+    const pastedText = e.clipboardData.getData('text');
+    const pastedValue = pastedText.trim().toUpperCase();
+    
+    // Warte kurz, damit der Wert im Input-Feld aktualisiert wird, dann suche sofort
+    setTimeout(() => {
+      if (pastedValue.length >= 1) {
+        handleIsinSearch(pastedValue);
+      }
+    }, 10);
+  };
 
   const loadStats = async () => {
     try {
@@ -625,16 +648,26 @@ export default function KategorienPage() {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
-          <div className="flex items-center gap-4">
-            <a
-              href="/"
-              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors text-sm font-medium"
-            >
-              ← Zurück zur Startseite
-            </a>
+          <div className="flex items-center gap-2">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              EIX-Kategorien-Übersicht
+              <a href="/" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                Kategorisierung
+              </a>
             </h1>
+            <span className="text-3xl font-bold text-gray-900 dark:text-white mx-2">/</span>
+            <a
+              href="/kategorien"
+              className="text-3xl font-bold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              Kategorien
+            </a>
+            <span className="text-3xl font-bold text-gray-900 dark:text-white mx-2">/</span>
+            <a
+              href="/isin-suche"
+              className="text-3xl font-bold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              Suche
+            </a>
           </div>
 
           <div className="flex items-center gap-4">
@@ -644,6 +677,7 @@ export default function KategorienPage() {
                 type="text"
                 value={searchIsin}
                 onChange={(e) => setSearchIsin(e.target.value.toUpperCase())}
+                onPaste={handlePaste}
                 placeholder="ISIN, WKN oder Mnemonic suchen..."
                 className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-0 w-64"
                 disabled={isSearchingIsin}
