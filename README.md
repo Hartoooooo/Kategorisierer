@@ -167,14 +167,19 @@ Die Anwendung implementiert mehrere Performance-Optimierungen:
 
 **Aktuelle Optimierungen:**
 - **ISIN-Caching**: Bereits geprüfte ISINs werden 24 Stunden gecacht (in-memory)
-- **Concurrency-Limit**: 17 parallele Requests (konfigurierbar via `FINNHUB_CONCURRENCY_LIMIT`)
+- **Mehrere API-Keys**: `FINNHUB_SECRET_2`, `FINNHUB_SECRET_3` für höhere Geschwindigkeit (Round-Robin)
+- **Concurrency-Limit**: 17 parallele Requests pro Key, skaliert mit Anzahl der Keys (3 Keys = 51), konfigurierbar via `FINNHUB_CONCURRENCY_LIMIT`
 - **Retry-Logik**: Exponential Backoff bei Rate Limits oder Server-Fehlern
 - **Timeout**: 7 Sekunden pro Request (optimiert von 10s)
 - **Frühe Exit-Strategie**: Wenn Schritt 1 erfolgreich ist, werden keine weiteren API-Calls gemacht
 
 **Konfiguration:**
 ```bash
-# Concurrency-Limit anpassen (Standard: 17)
+# Weitere Finnhub API-Keys für höhere Geschwindigkeit (separate Accounts empfohlen)
+# FINNHUB_SECRET_2=zweiter_key_hier
+# FINNHUB_SECRET_3=dritter_key_hier
+
+# Concurrency-Limit pro Key (Standard: 17, skaliert mit Anzahl der Keys)
 FINNHUB_CONCURRENCY_LIMIT=20
 ```
 

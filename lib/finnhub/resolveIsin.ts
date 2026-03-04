@@ -64,6 +64,11 @@ function findBestMatch(results: SearchResult[]): SearchResult | null {
   return results[0];
 }
 
+export interface ResolveIsinOptions {
+  /** Optional: Fester API-Token (für explizite Aufteilung auf mehrere Keys) */
+  token?: string;
+}
+
 /**
  * Versucht, eine ISIN über verschiedene Finnhub-Endpoints aufzulösen
  * Strategie:
@@ -74,8 +79,10 @@ function findBestMatch(results: SearchResult[]): SearchResult | null {
 export async function resolveIsin(
   isin: string,
   name?: string,
-  originalRowData?: Record<string, unknown>
+  originalRowData?: Record<string, unknown>,
+  options?: ResolveIsinOptions
 ): Promise<ResolveResult> {
+  const tokenOpt = options?.token ? { token: options.token } : undefined;
   // Prüfe Cache zuerst
   const cached = isinCache.get(isin);
   if (cached) {
@@ -95,9 +102,7 @@ export async function resolveIsin(
   // Schritt 1: Company Profile2 per ISIN versuchen
   try {
     console.log(`[resolveIsin] Schritt 1: Versuche Profile2 für ISIN ${isin}, Name: ${name || "nicht vorhanden"}`);
-    const profile = await finnhubRequest("/stock/profile2", {
-      isin: isin,
-    });
+    const profile = await finnhubRequest("/stock/profile2", { isin }, tokenOpt);
 
     console.log(`[resolveIsin] Profile2 Response für ${isin}:`, JSON.stringify(profile).substring(0, 500));
 
@@ -125,7 +130,7 @@ export async function resolveIsin(
   // Schritt 2: Symbol Lookup per ISIN
   try {
     console.log(`[resolveIsin] Schritt 2: Versuche Search für ISIN ${isin}, Name: ${name || "nicht vorhanden"}`);
-    const searchResult = await finnhubRequest("/search", { q: isin });
+    const searchResult = await finnhubRequest("/search", { q: isin }, tokenOpt);
     
     console.log(`[resolveIsin] Search Response für ${isin}:`, JSON.stringify(searchResult).substring(0, 500));
     
@@ -163,9 +168,7 @@ export async function resolveIsin(
           // Schritt 3: Mit Symbol weiter anreichern
           try {
             console.log(`[resolveIsin] Schritt 3: Hole Profile2 für Symbol ${bestMatch.symbol}`);
-            const enrichedProfile = await finnhubRequest("/stock/profile2", {
-              symbol: bestMatch.symbol,
-            });
+            const enrichedProfile = await finnhubRequest("/stock/profile2", { symbol: bestMatch.symbol }, tokenOpt);
 
             console.log(`[resolveIsin] Profile2 für Symbol ${bestMatch.symbol}:`, JSON.stringify(enrichedProfile).substring(0, 200));
 

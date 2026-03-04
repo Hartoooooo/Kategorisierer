@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { checkRequestSchema } from "@/lib/validation/schemas";
 import { jobStore } from "@/lib/store/jobStore";
 import { resolveIsin } from "@/lib/finnhub/resolveIsin";
-import { finnhubRequestBatch } from "@/lib/finnhub/client";
+import { finnhubRequestBatch, getFinnhubConcurrencyLimit, getFinnhubTokens } from "@/lib/finnhub/client";
 import { CheckedRow, CheckSummary } from "@/types";
 import { saveCategorizedToSupabase } from "@/lib/superbase/saveCategorized";
 import { checkExistingIsins, convertSupabaseToResolveResult } from "@/lib/superbase/checkExisting";
@@ -71,9 +71,11 @@ export async function POST(request: NextRequest) {
 
     // Alle eindeutigen ISINs prüfen
     let uniqueIsinsArray = Array.from(uniqueIsins.values());
-    
-    // Batch-Logik: Alle Batches je 40 ISINs
-    const BATCH_SIZE = 40;
+
+    // Batch-Größe skaliert mit Anzahl API-Keys (1 Key=40, 2 Keys=80, 3 Keys=120)
+    const BASE_BATCH_SIZE = 40;
+    const tokenCount = Math.max(1, getFinnhubTokens().length);
+    const BATCH_SIZE = BASE_BATCH_SIZE * tokenCount;
     
     // Deklariere Variablen außerhalb der if-else-Blöcke
     let existingIsins: Array<{ isin: string; name: string; rowIndices: number[]; originalRowData?: Record<string, unknown>; supabaseData: ReturnType<typeof convertSupabaseToResolveResult> }> = [];
@@ -256,26 +258,92 @@ export async function POST(request: NextRequest) {
     }
 
     // Finnhub Requests nur für neue ISINs vorbereiten
-    const resolveRequests = newIsins.map(
-      ({ isin, name, originalRowData }) => () => resolveIsin(isin, name, originalRowData)
-    );
-
-    // Batch-Requests mit Concurrency-Limit ausführen (nur für neue ISINs)
-    // Wenn keine neuen ISINs vorhanden sind, verwende leere Ergebnisse
+    // Mehrere API-Keys: Batches auf Keys aufteilen, jeder Key bekommt eigene Sub-Batches (alle Keys parallel)
+    const tokens = getFinnhubTokens();
+    const baseConcurrency = parseInt(process.env.FINNHUB_CONCURRENCY_LIMIT || "17", 10);
     let resolveResults: Array<Awaited<ReturnType<typeof resolveIsin>>> = [];
     let averageTimePerRequest = 0;
-    
-    if (resolveRequests.length > 0) {
-      const batchResult = await finnhubRequestBatch(resolveRequests);
-      resolveResults = batchResult.results;
-      averageTimePerRequest = batchResult.averageTimePerRequest;
+
+    console.log(`[check] Finnhub API-Keys: ${tokenCount}, Batch-Größe: ${BATCH_SIZE} ISINs pro Schritt`);
+
+    const apiBatchStartTime = Date.now();
+
+    if (newIsins.length > 0) {
+      if (tokens.length <= 1) {
+        // Ein Key: ein Batch mit Round-Robin (Fallback)
+        const resolveRequests = newIsins.map(
+          ({ isin, name, originalRowData }) => () => resolveIsin(isin, name, originalRowData)
+        );
+        const batchResult = await finnhubRequestBatch(resolveRequests);
+        resolveResults = batchResult.results;
+        averageTimePerRequest = batchResult.averageTimePerRequest;
+      } else {
+        // Mehrere Keys: Aufteilen – jeder Key bekommt 1/N der ISINs, alle laufen parallel
+        const groupPromises = tokens.map((token, tokenIndex) => {
+          const groupItems = newIsins
+            .map((item, idx) => ({ item, idx }))
+            .filter(({ idx }) => idx % tokens.length === tokenIndex);
+
+          if (groupItems.length === 0) {
+            return Promise.resolve({ results: [] as Awaited<ReturnType<typeof resolveIsin>>[], averageTimePerRequest: 0 });
+          }
+
+          const resolveRequests = groupItems.map(
+            ({ item }) => () => resolveIsin(item.isin, item.name, item.originalRowData, { token })
+          );
+
+          return finnhubRequestBatch(resolveRequests, baseConcurrency).then((batchResult) => ({
+            results: batchResult.results,
+            indices: groupItems.map((g) => g.idx),
+            averageTimePerRequest: batchResult.averageTimePerRequest,
+          }));
+        });
+
+        const groupResults = await Promise.all(groupPromises);
+
+        // Ergebnisse in ursprüngliche Reihenfolge zurückführen
+        const merged: (Awaited<ReturnType<typeof resolveIsin>> | null)[] = new Array(newIsins.length).fill(null);
+        let totalTime = 0;
+        let totalCount = 0;
+        groupResults.forEach((r) => {
+          if ("indices" in r && Array.isArray(r.indices)) {
+            r.indices.forEach((origIdx: number, i: number) => {
+              merged[origIdx] = r.results[i];
+            });
+            totalTime += r.averageTimePerRequest * r.results.length;
+            totalCount += r.results.length;
+          }
+        });
+        resolveResults = merged as Awaited<ReturnType<typeof resolveIsin>>[]; // Alle Slots gefüllt, Reihenfolge = newIsins
+        averageTimePerRequest = totalCount > 0 ? totalTime / totalCount : 0;
+
+        console.log(`[check] Batch ${batchIndex}: ${tokens.length} API-Keys parallel, ${newIsins.length} ISINs aufgeteilt`);
+      }
     } else {
       console.log(`[check] Batch ${batchIndex}: Keine neuen ISINs zum Prüfen über Finnhub API (alle bereits in Supabase oder bereits geprüft)`);
     }
 
+    // Durchsatz-Tracking: wie viele ISINs lieferten ein Ergebnis, Rate pro Minute
+    const apiBatchDurationMs = Date.now() - apiBatchStartTime;
+    const categorizedSuccess = resolveResults.filter(
+      (r) => r && r.status === "success" && r.category !== "Unbekannt/Fehler"
+    ).length;
+    const categorizedError = resolveResults.filter(
+      (r) => r && (r.status === "error" || r.category === "Unbekannt/Fehler")
+    ).length;
+    const apiProcessedTotal = resolveResults.filter((r) => r !== null).length;
+    const ratePerMinute =
+      apiBatchDurationMs > 0
+        ? (categorizedSuccess / apiBatchDurationMs) * 60_000
+        : 0;
+
+    console.log(
+      `[check] Durchsatz Batch ${batchIndex}: ${categorizedSuccess}/${apiProcessedTotal} kategorisiert, ${categorizedError} Fehler, ${(apiBatchDurationMs / 1000).toFixed(1)}s → ${ratePerMinute.toFixed(1)} ISINs/min`
+    );
+
     // Berechne die geschätzte verbleibende Zeit
     // Formel: (Anzahl noch zu prüfender ISINs / Concurrency-Limit) * durchschnittliche Zeit pro Request
-    const CONCURRENCY_LIMIT = parseInt(process.env.FINNHUB_CONCURRENCY_LIMIT || "17", 10);
+    const CONCURRENCY_LIMIT = getFinnhubConcurrencyLimit();
     
     // Berechne verbleibende ISINs für weitere Batches
     let remainingIsinsCount = 0;
@@ -643,6 +711,10 @@ export async function POST(request: NextRequest) {
         averageTimePerRequest,
         totalIsins,
         estimatedTotalTime: estimatedTotalTime,
+        apiBatchDurationMs,
+        categorizedSuccess,
+        categorizedError,
+        ratePerMinute: Math.round(ratePerMinute * 10) / 10,
       },
       hasMore: remainingIsinsCount > 0, // Gibt es noch weitere ISINs?
       nextOffset: batchIndex === 0 
@@ -658,10 +730,14 @@ export async function POST(request: NextRequest) {
         apiCheck: {
           totalToCheck: newIsins.length,
           checked: resolveResults.filter(r => r !== null).length,
+          categorizedSuccess,
+          categorizedError,
+          ratePerMinute: Math.round(ratePerMinute * 10) / 10,
+          durationSeconds: Math.round(apiBatchDurationMs / 100) / 10,
         },
-        // WICHTIG: Anzahl der neuen ISINs für Zeitberechnung
         newIsinsCount: newIsins.length,
         totalIsinsCount: uniqueIsinsArray.length,
+        batchSize: BATCH_SIZE,
       } : undefined,
     });
   } catch (error) {

@@ -17,6 +17,8 @@ Gehe zu **Project Settings** → **Environment Variables** und füge folgende Va
 | Variable Name | Wert | Beschreibung |
 |--------------|------|--------------|
 | `FINNHUB_SECRET` | `d5qbt61r01qhn30enodgd5qbt61r01qhn30enoe0` | Dein Finnhub API-Key (aus `.env.local`) |
+| `FINNHUB_SECRET_2` | *(optional)* | Zweiter API-Key für höhere Geschwindigkeit (Round-Robin) |
+| `FINNHUB_SECRET_3` | *(optional)* | Dritter API-Key für höhere Geschwindigkeit (Round-Robin) |
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://ywxqivbcjwgxriuojvfi.supabase.co` | Deine Supabase Projekt-URL (aus `.env.local`) |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_iJ5VWPdVAvfS3Z7UR0KG9Q_F76nztUw` | Dein Supabase Anon/Public Key (aus `.env.local`) |
 
@@ -25,7 +27,7 @@ Gehe zu **Project Settings** → **Environment Variables** und füge folgende Va
 | Variable Name | Standardwert | Beschreibung |
 |--------------|--------------|--------------|
 | `FINNHUB_BASE_URL` | `https://finnhub.io/api/v1` | Finnhub API Base URL (normalerweise nicht ändern) |
-| `FINNHUB_CONCURRENCY_LIMIT` | `17` | Anzahl paralleler API-Requests (Rate-Limit beachten) |
+| `FINNHUB_CONCURRENCY_LIMIT` | `17` | Parallele Requests pro Key (skaliert mit Anzahl der Keys) |
 | `APP_MAX_UPLOAD_MB` | `10` | Maximale Upload-Größe in MB |
 
 ### 3. Wichtige Einstellungen bei Vercel

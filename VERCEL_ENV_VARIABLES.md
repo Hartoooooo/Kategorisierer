@@ -14,6 +14,8 @@
 
 | Key | Value |
 |-----|-------|
+| `FINNHUB_SECRET_2` | *(zweiter API-Key für höhere Geschwindigkeit)* |
+| `FINNHUB_SECRET_3` | *(dritter API-Key für höhere Geschwindigkeit)* |
 | `FINNHUB_BASE_URL` | `https://finnhub.io/api/v1` |
 | `FINNHUB_CONCURRENCY_LIMIT` | `17` |
 | `APP_MAX_UPLOAD_MB` | `10` |
@@ -33,6 +35,8 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_iJ5VWPdVAvfS3Z7UR0KG9Q_F76nz
 ### Optionale Variablen:
 
 ```
+FINNHUB_SECRET_2=zweiter_finnhub_api_key_hier
+FINNHUB_SECRET_3=dritter_finnhub_api_key_hier
 FINNHUB_BASE_URL=https://finnhub.io/api/v1
 FINNHUB_CONCURRENCY_LIMIT=17
 APP_MAX_UPLOAD_MB=10

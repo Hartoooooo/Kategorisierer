@@ -22,9 +22,17 @@ export default function Home() {
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [checkInfo, setCheckInfo] = useState<{
     supabaseCheck: { totalChecked: number; foundInDatabase: number; notFoundInDatabase: number };
-    apiCheck: { totalToCheck: number; checked: number };
-    newIsinsCount?: number; // Anzahl der neuen ISINs, die noch geprüft werden müssen
-    totalIsinsCount?: number; // Gesamtanzahl der ISINs
+    apiCheck: {
+      totalToCheck: number;
+      checked: number;
+      categorizedSuccess?: number;
+      categorizedError?: number;
+      ratePerMinute?: number;
+      durationSeconds?: number;
+    };
+    newIsinsCount?: number;
+    totalIsinsCount?: number;
+    batchSize?: number;
   } | null>(null);
   const [showCheckInfo, setShowCheckInfo] = useState(false);
   const [checkStatus, setCheckStatus] = useState<'idle' | 'checking-supabase' | 'checking-api' | 'completed'>('idle');
@@ -130,7 +138,7 @@ export default function Home() {
     if (!jobId || parsedRows.length === 0) return;
 
     const startTime = Date.now();
-    const batchSize = 40; // Alle Batches haben 40 ISINs
+    const batchSize = checkInfo?.batchSize ?? 40; // Vom Backend (skaliert mit API-Keys), Fallback 40
     const validIsins = parsedRows.filter((r) => r.validIsin);
     const uniqueIsins = new Set(validIsins.map((r) => r.isin));
     const totalUniqueIsins = uniqueIsins.size;
@@ -190,6 +198,9 @@ export default function Home() {
         return;
       }
 
+      // Batch-Größe aus Response (skaliert mit API-Keys: 40/80/120)
+      const effectiveBatchSize = data.checkInfo?.batchSize ?? checkInfo?.batchSize ?? batchSize;
+
       // Zeige Prüfungsinformationen im ersten Batch und aktualisiere Zeitberechnung
       if (batchIdx === 0 && data.checkInfo) {
         setCheckInfo(data.checkInfo);
@@ -200,8 +211,8 @@ export default function Home() {
         const newIsinsCount = data.checkInfo.newIsinsCount || data.checkInfo.apiCheck.totalToCheck;
         const foundInDatabase = data.checkInfo.supabaseCheck.foundInDatabase;
         
-        // Berechne Batches nur für neue ISINs
-        const newTotalBatches = Math.ceil(newIsinsCount / batchSize);
+        // Berechne Batches nur für neue ISINs (effectiveBatchSize vom Backend)
+        const newTotalBatches = Math.ceil(newIsinsCount / effectiveBatchSize);
         const newEstimatedTime = newTotalBatches * BATCH_TIME_SECONDS;
         
         console.log(`[checkBatch] Zeitberechnung aktualisiert: ${foundInDatabase} bereits vorhanden, ${newIsinsCount} neue ISINs, ${newTotalBatches} Batches, ${newEstimatedTime}s geschätzte Zeit`);
@@ -243,9 +254,8 @@ export default function Home() {
       }
 
       // Aktualisiere Progress für fertigen Batch
-      // WICHTIG: Progress basiert nur auf neuen ISINs (nicht auf bereits vorhandenen)
-      const newIsinsCount = checkInfo?.newIsinsCount || checkInfo?.apiCheck.totalToCheck || totalUniqueIsins;
-      const actualTotalBatches = Math.ceil(newIsinsCount / batchSize);
+      const newIsinsCount = data.checkInfo?.newIsinsCount ?? checkInfo?.newIsinsCount ?? checkInfo?.apiCheck?.totalToCheck ?? totalUniqueIsins;
+      const actualTotalBatches = Math.ceil(newIsinsCount / effectiveBatchSize);
       const batchProgress = actualTotalBatches > 0 ? ((batchIdx + 1) / actualTotalBatches) * 100 : 100;
       setCheckProgress(Math.min(batchProgress, 100));
       
@@ -254,10 +264,8 @@ export default function Home() {
 
       // Wenn es weitere ISINs gibt, starte nächsten Batch nach 1 Minute
       if (data.hasMore && data.nextOffset !== undefined) {
-        // Aktualisiere den kontinuierlichen Timer für die Zeit
-        // WICHTIG: Berechne nur für neue ISINs (nicht für bereits vorhandene)
-        const newIsinsCountForTimer = checkInfo?.newIsinsCount || checkInfo?.apiCheck.totalToCheck || totalUniqueIsins;
-        const actualTotalBatches = Math.ceil(newIsinsCountForTimer / batchSize);
+        const newIsinsCountForTimer = data.checkInfo?.newIsinsCount ?? checkInfo?.newIsinsCount ?? checkInfo?.apiCheck?.totalToCheck ?? totalUniqueIsins;
+        const actualTotalBatches = Math.ceil(newIsinsCountForTimer / effectiveBatchSize);
         const remainingBatches = actualTotalBatches - batchIdx - 1;
         
         // Setze initiale Zeit (verbleibende Batches + 1 Minute für aktuellen Batch)
@@ -554,9 +562,13 @@ export default function Home() {
                           <div className="flex items-start gap-3">
                             <span className="font-bold text-blue-600 dark:text-blue-400 text-lg animate-pulse">→</span>
                             <div className="flex-1">
-                              <span className="font-semibold text-gray-900 dark:text-gray-100">Schritt 2: Finnhub API-Prüfung läuft</span>
+                              <span className="font-semibold text-gray-900 dark:text-gray-100">Schritt 2: Finnhub API-Prüfung</span>
                               <div className="text-gray-700 dark:text-gray-300 mt-1">
-                                {checkInfo.apiCheck.totalToCheck} ISINs werden jetzt über die API geprüft...
+                                {checkInfo.apiCheck.categorizedSuccess != null ? (
+                                  <> {checkInfo.apiCheck.categorizedSuccess}/{checkInfo.apiCheck.checked} kategorisiert, {checkInfo.apiCheck.categorizedError ?? 0} Fehler • {checkInfo.apiCheck.ratePerMinute ?? "-"} ISINs/min ({checkInfo.apiCheck.durationSeconds ?? "-"}s)</>
+                                ) : (
+                                  <>{checkInfo.apiCheck.totalToCheck} ISINs werden über die API geprüft...</>
+                                )}
                               </div>
                             </div>
                           </div>
