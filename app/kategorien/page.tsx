@@ -95,6 +95,11 @@ function extractBasket(originalRowData: Record<string, unknown> | null | string)
  * - "Mnemonic": '"GWS"'
  * - Falls original_row_data als JSON-String gespeichert ist, wird es geparst
  */
+/** Nur Buchstaben/Ziffern — typisch für ISIN/WKN/Mnemonic (Namen können Leerzeichen, Bindestriche, Umlaute enthalten). */
+function looksLikePlainIdentifier(s: string): boolean {
+  return /^[A-Za-z0-9]+$/.test(s);
+}
+
 function extractMnemonic(originalRowData: Record<string, unknown> | null | string): string | null {
   if (!originalRowData) return null;
   
@@ -206,6 +211,8 @@ export default function KategorienPage() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
   const [basketFilter, setBasketFilter] = useState<"EIX B" | "EIX M" | null>(null);
+  /** Mehrere Namenstreffer: Pagination per Slice im Client (nicht pro Seite via API). */
+  const [isClientSideNamePaging, setIsClientSideNamePaging] = useState(false);
 
   // Dark Mode initialisieren
   useEffect(() => {
@@ -229,31 +236,31 @@ export default function KategorienPage() {
     loadAssets();
   }, [selectedCategory, selectedUnterkategorie, selectedRohstoffArt, selectedDirection, selectedHebelHoehe, basketFilter, currentPage]);
 
-  // Suche automatisch, wenn ISIN, WKN oder Mnemonic eingegeben wird (mit Debouncing)
+  // Suche automatisch: ISIN/WKN/Mnemonic oder Name (mit Debouncing)
   useEffect(() => {
-    const normalizedSearch = searchIsin.trim().toUpperCase();
-    
+    const trimmed = searchIsin.trim();
+
     // Wenn das Suchfeld leer ist, lade normale Assets
-    if (normalizedSearch.length === 0) {
+    if (trimmed.length === 0) {
       setSearchResult(null);
       setSearchError(null);
+      setIsClientSideNamePaging(false);
       if (!loading) {
         loadAssets();
       }
       return;
     }
-    
+
     // Debouncing: Warte 500ms nach dem letzten Tastendruck bevor gesucht wird
     const timer = setTimeout(() => {
-      // ISIN: mindestens 12 Zeichen, WKN: mindestens 6 Zeichen, Mnemonic: mindestens 1 Zeichen
-      if (normalizedSearch.length >= 12 || (normalizedSearch.length >= 6 && normalizedSearch.length < 12) || normalizedSearch.length >= 1) {
-        handleIsinSearch(normalizedSearch);
+      if (!looksLikePlainIdentifier(trimmed) && trimmed.length < 2) {
+        return;
       }
-    }, 500); // 500ms Verzögerung
-    
+      handleIsinSearch(trimmed);
+    }, 500);
+
     setDebounceTimer(timer);
-    
-    // Cleanup: Timer löschen wenn sich der Wert vor Ablauf ändert
+
     return () => {
       clearTimeout(timer);
     };
@@ -268,14 +275,13 @@ export default function KategorienPage() {
     }
     
     // Lese den eingefügten Wert aus dem Clipboard
-    const pastedText = e.clipboardData.getData('text');
-    const pastedValue = pastedText.trim().toUpperCase();
-    
-    // Warte kurz, damit der Wert im Input-Feld aktualisiert wird, dann suche sofort
+    const pastedText = e.clipboardData.getData("text");
+    const pastedValue = pastedText.trim();
+
     setTimeout(() => {
-      if (pastedValue.length >= 1) {
-        handleIsinSearch(pastedValue);
-      }
+      if (pastedValue.length === 0) return;
+      if (!looksLikePlainIdentifier(pastedValue) && pastedValue.length < 2) return;
+      handleIsinSearch(pastedValue);
     }, 10);
   };
 
@@ -380,32 +386,69 @@ export default function KategorienPage() {
     }
   };
 
+  const fetchNameSearch = async (term: string) => {
+    const response = await fetch("/api/isin-search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: term }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setSearchError(data.error || "Fehler bei der Namenssuche");
+      setAssets([]);
+      setTotalCount(0);
+      setIsClientSideNamePaging(false);
+      setSearchResult(null);
+      return;
+    }
+    const rows: Asset[] = Array.isArray(data.data) ? data.data : [];
+    if (!data.found || rows.length === 0) {
+      setSearchError("Kein Eintrag mit diesem Namen gefunden");
+      setAssets([]);
+      setTotalCount(0);
+      setIsClientSideNamePaging(false);
+      setSearchResult(null);
+      return;
+    }
+    setSearchError(null);
+    setSearchResult(null);
+    setIsClientSideNamePaging(true);
+    setCurrentPage(1);
+    setAssets(rows);
+    setTotalCount(typeof data.count === "number" ? data.count : rows.length);
+  };
+
   const handleIsinSearch = async (searchValue: string) => {
-    // Bestimme ob es eine ISIN (12+ Zeichen), WKN (6-11 Zeichen) oder Mnemonic (1+ Zeichen) ist
-    const isIsin = searchValue.length >= 12;
-    const isWkn = searchValue.length >= 6 && searchValue.length < 12;
-    const isMnemonic = searchValue.length >= 1 && searchValue.length < 6;
+    const trimmed = searchValue.trim();
+    if (!trimmed) return;
 
     setIsSearchingIsin(true);
     setSearchError(null);
     setSearchResult(null);
 
     try {
-      let requestBody;
+      if (!looksLikePlainIdentifier(trimmed)) {
+        await fetchNameSearch(trimmed);
+        return;
+      }
+
+      const upper = trimmed.toUpperCase();
+      const isIsin = upper.length >= 12;
+      const isWkn = upper.length >= 6 && upper.length < 12;
+      const isMnemonic = upper.length >= 1 && upper.length < 6;
+
+      let requestBody: Record<string, string>;
       if (isIsin) {
-        requestBody = { isin: searchValue };
+        requestBody = { isin: upper };
       } else if (isWkn) {
-        requestBody = { wkn: searchValue };
+        requestBody = { wkn: upper };
       } else {
-        // Mnemonic oder allgemeine Suche
-        requestBody = { mnemonic: searchValue };
+        requestBody = { mnemonic: upper };
       }
 
       const response = await fetch("/api/isin-search", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       });
 
@@ -413,15 +456,29 @@ export default function KategorienPage() {
 
       if (!response.ok) {
         setSearchError(data.error || "Fehler beim Suchen");
+        setIsClientSideNamePaging(false);
         return;
       }
 
-      if (data.found) {
-        setSearchResult(data.data);
-        // Setze die Assets auf das gefundene Ergebnis
-        setAssets([data.data]);
-        setTotalCount(1);
+      if (data.found && data.data) {
+        if (data.multiple && Array.isArray(data.data)) {
+          setIsClientSideNamePaging(true);
+          setCurrentPage(1);
+          setAssets(data.data);
+          setTotalCount(typeof data.count === "number" ? data.count : data.data.length);
+          setSearchResult(null);
+        } else {
+          setIsClientSideNamePaging(false);
+          setSearchResult(data.data);
+          setAssets([data.data]);
+          setTotalCount(1);
+        }
       } else {
+        if (!isIsin && trimmed.length >= 2) {
+          await fetchNameSearch(trimmed);
+          return;
+        }
+        setIsClientSideNamePaging(false);
         if (isIsin) {
           setSearchError("ISIN nicht in der Datenbank gefunden");
         } else if (isWkn) {
@@ -436,6 +493,7 @@ export default function KategorienPage() {
       setSearchError("Fehler beim Suchen: " + (err instanceof Error ? err.message : "Unbekannter Fehler"));
       setAssets([]);
       setTotalCount(0);
+      setIsClientSideNamePaging(false);
     } finally {
       setIsSearchingIsin(false);
     }
@@ -695,6 +753,10 @@ export default function KategorienPage() {
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
+  const tableAssets = isClientSideNamePaging
+    ? assets.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+    : assets;
+
   return (
     <div className="min-h-screen py-8 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900">
       <div className="max-w-7xl mx-auto">
@@ -723,14 +785,14 @@ export default function KategorienPage() {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* ISIN Suche */}
+            {/* ISIN / WKN / Mnemonic / Name */}
             <div className="relative">
               <input
                 type="text"
                 value={searchIsin}
-                onChange={(e) => setSearchIsin(e.target.value.toUpperCase())}
+                onChange={(e) => setSearchIsin(e.target.value)}
                 onPaste={handlePaste}
-                placeholder="ISIN, WKN oder Mnemonic suchen..."
+                placeholder="ISIN, WKN, Mnemonic oder Name..."
                 className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-0 w-64"
                 disabled={isSearchingIsin}
               />
@@ -1001,7 +1063,7 @@ export default function KategorienPage() {
             </div>
           </div>
 
-          {/* Fehlermeldung für ISIN/WKN/Mnemonic-Suche */}
+          {/* Fehlermeldung für Suche */}
           {searchError && searchIsin.trim().length >= 1 && (
             <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
               <p className="text-red-800 dark:text-red-200">{searchError}</p>
@@ -1053,7 +1115,7 @@ export default function KategorienPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {assets.map((asset) => (
+                    {tableAssets.map((asset) => (
                       <tr
                         key={asset.id}
                         className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
